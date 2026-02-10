@@ -2,7 +2,9 @@ package sentinel
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/arkeonetwork/arkeo/common"
 	"github.com/arkeonetwork/arkeo/common/cosmos"
@@ -53,6 +55,53 @@ func GenerateArkAuthString(contractId uint64, nonce int64, signature []byte, cha
 
 func GenerateMessageToSign(contractId uint64, nonce int64, chainId string) string {
 	return fmt.Sprintf("%d:%d:", contractId, nonce)
+}
+
+// buildADR036SignBytes constructs the amino-encoded StdSignDoc that Cosmos
+// wallets (e.g. Keplr) produce when calling signArbitrary(). This follows
+// ADR-036: https://docs.cosmos.network/main/architecture/adr-036-arbitrary-signature
+func buildADR036SignBytes(signer string, data []byte) []byte {
+	// The StdSignDoc must have deterministic JSON encoding with sorted keys.
+	type Fee struct {
+		Amount []json.RawMessage `json:"amount"`
+		Gas    string            `json:"gas"`
+	}
+	type MsgValue struct {
+		Data   string `json:"data"`
+		Signer string `json:"signer"`
+	}
+	type Msg struct {
+		Type  string   `json:"type"`
+		Value MsgValue `json:"value"`
+	}
+	type StdSignDoc struct {
+		AccountNumber string `json:"account_number"`
+		ChainID       string `json:"chain_id"`
+		Fee           Fee    `json:"fee"`
+		Memo          string `json:"memo"`
+		Msgs          []Msg  `json:"msgs"`
+		Sequence      string `json:"sequence"`
+	}
+
+	doc := StdSignDoc{
+		AccountNumber: "0",
+		ChainID:       "",
+		Fee:           Fee{Amount: []json.RawMessage{}, Gas: "0"},
+		Memo:          "",
+		Msgs: []Msg{{
+			Type: "sign/MsgSignData",
+			Value: MsgValue{
+				Data:   base64.StdEncoding.EncodeToString(data),
+				Signer: signer,
+			},
+		}},
+		Sequence: "0",
+	}
+
+	// json.Marshal produces sorted keys for struct fields in declaration order,
+	// which matches the required ADR-036 canonical form above.
+	bz, _ := json.Marshal(doc)
+	return bz
 }
 
 func parseContractAuth(raw string) (ContractAuth, error) {
@@ -549,6 +598,15 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 			k.Write([]byte(prefix))
 			k.Write([]byte(pre))
 			ok = pk.VerifySignature(k.Sum(nil), aa.Signature)
+		}
+
+		// 5) compat: ADR-036 signArbitrary (Keplr / Cosmos wallets)
+		// Keplr's signArbitrary wraps the data in an amino StdSignDoc before signing.
+		if !ok {
+			signerAddr := cosmos.AccAddress(pk.Address())
+			adr036Bytes := buildADR036SignBytes(signerAddr.String(), []byte(pre))
+			adr036Digest := sha256.Sum256(adr036Bytes)
+			ok = pk.VerifySignature(adr036Digest[:], aa.Signature)
 		}
 
 		if !ok {
