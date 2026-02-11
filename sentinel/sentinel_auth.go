@@ -9,6 +9,8 @@ import (
 	"github.com/arkeonetwork/arkeo/common"
 	"github.com/arkeonetwork/arkeo/common/cosmos"
 	"github.com/arkeonetwork/arkeo/x/arkeo/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
+	sdktypes "github.com/cosmos/cosmos-sdk/types/bech32"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/time/rate"
 	"net/http"
@@ -57,10 +59,27 @@ func GenerateMessageToSign(contractId uint64, nonce int64, chainId string) strin
 	return fmt.Sprintf("%d:%d:", contractId, nonce)
 }
 
+// decodeBech32Pubkey decodes a bech32-encoded secp256k1 public key (e.g. arkeopub1...)
+// without requiring the SDK's global bech32 prefix configuration.
+func decodeBech32Pubkey(bech string) (*secp256k1.PubKey, error) {
+	_, data, err := sdktypes.DecodeAndConvert(bech)
+	if err != nil {
+		return nil, fmt.Errorf("bech32 decode: %w", err)
+	}
+	// Amino-encoded secp256k1 pubkey: 5-byte prefix (eb5ae987 21) + 33-byte key
+	if len(data) == 38 {
+		data = data[5:]
+	}
+	if len(data) != 33 {
+		return nil, fmt.Errorf("unexpected pubkey length: %d", len(data))
+	}
+	return &secp256k1.PubKey{Key: data}, nil
+}
+
 // buildADR036SignBytes constructs the amino-encoded StdSignDoc that Cosmos
 // wallets (e.g. Keplr) produce when calling signArbitrary(). This follows
 // ADR-036: https://docs.cosmos.network/main/architecture/adr-036-arbitrary-signature
-func buildADR036SignBytes(signer string, data []byte) []byte {
+func buildADR036SignBytes(signer string, data []byte, chainID string) []byte {
 	// The StdSignDoc must have deterministic JSON encoding with sorted keys.
 	type Fee struct {
 		Amount []json.RawMessage `json:"amount"`
@@ -85,7 +104,7 @@ func buildADR036SignBytes(signer string, data []byte) []byte {
 
 	doc := StdSignDoc{
 		AccountNumber: "0",
-		ChainID:       "",
+		ChainID:       chainID,
 		Fee:           Fee{Amount: []json.RawMessage{}, Gas: "0"},
 		Memo:          "",
 		Msgs: []Msg{{
@@ -176,14 +195,12 @@ func parseArkAuth(raw string, configChainId string) (ArkAuth, error) {
 			return aa, err
 		}
 
-		pubKey, err := cosmos.GetPubKeyFromBech32(cosmos.Bech32PubKeyTypeAccPub, parts[1])
-		if err != nil {
-			return aa, err
-		}
-		aa.Spender, err = common.NewPubKeyFromCrypto(pubKey)
-		if err != nil {
-			return aa, err
-		}
+		// Store the raw bech32 pubkey string as the spender.
+		// common.NewPubKey and cosmos.GetPubKeyFromBech32 require
+		// bech32 prefix config to be initialised first; using PubKey()
+		// directly is safe because paidTier() re-decodes via the same
+		// config which IS initialised by the time requests arrive.
+		aa.Spender = common.PubKey(parts[1])
 
 		aa.Nonce, err = strconv.ParseInt(parts[2], 10, 64)
 		if err != nil {
@@ -288,6 +305,7 @@ func (p Proxy) auth(next http.Handler) http.Handler {
 		aa, err := p.fetchArkAuth(r)
 		remoteAddr := p.getRemoteAddr(r)
 		if err != nil {
+			p.logger.Info("DEBUG: fetchArkAuth error", "error", err.Error())
 			// Attempt to fetch contract id from query
 			args := r.URL.Query()
 			contractIdStr := args.Get("contract_id")
@@ -569,9 +587,11 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 	// Compat: raw preimage, Keccak(preimage), and EIP-191 personal_sign over preimage.
 	{
 		pre := fmt.Sprintf("%d:%d:", aa.ContractId, aa.Nonce)
+		fmt.Printf("DEBUG SIG-CHECK: pre=%s spender=%s nonce=%d\n", pre, aa.Spender.String(), aa.Nonce)
 		digest := sha256.Sum256([]byte(pre))
 
-		pk, err := cosmos.GetPubKeyFromBech32(cosmos.Bech32PubKeyTypeAccPub, aa.Spender.String())
+		// Decode pubkey from bech32 directly to avoid SDK prefix config dependency
+		pk, err := decodeBech32Pubkey(aa.Spender.String())
 		if err != nil {
 			return http.StatusUnauthorized, fmt.Errorf("invalid client pubkey: %w", err)
 		}
@@ -601,12 +621,19 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 		}
 
 		// 5) compat: ADR-036 signArbitrary (Keplr / Cosmos wallets)
-		// Keplr's signArbitrary wraps the data in an amino StdSignDoc before signing.
+		// Keplr uses empty chain_id in its StdSignDoc for signArbitrary.
+		// NOTE: pk.VerifySignature(msg, sig) internally hashes msg with SHA-256,
+		// so we pass the raw StdSignDoc bytes, NOT the digest.
 		if !ok {
 			signerAddr := cosmos.AccAddress(pk.Address())
-			adr036Bytes := buildADR036SignBytes(signerAddr.String(), []byte(pre))
-			adr036Digest := sha256.Sum256(adr036Bytes)
-			ok = pk.VerifySignature(adr036Digest[:], aa.Signature)
+			// Try empty chain_id first (Keplr's actual behavior)
+			adr036Bytes := buildADR036SignBytes(signerAddr.String(), []byte(pre), "")
+			ok = pk.VerifySignature(adr036Bytes, aa.Signature)
+			// Fallback: try with actual chain ID
+			if !ok {
+				adr036Bytes2 := buildADR036SignBytes(signerAddr.String(), []byte(pre), aa.ChainId)
+				ok = pk.VerifySignature(adr036Bytes2, aa.Signature)
+			}
 		}
 
 		if !ok {
