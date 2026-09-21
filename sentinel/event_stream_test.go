@@ -32,6 +32,11 @@ func newTestConfig() conf.Configuration {
 		FreeTierRateLimit:  100,
 		ClaimStoreLocation: "",
 		ArkeoAuthContractId: 0, // No auth for tests
+		Services: []conf.ServiceConfig{{
+			Name:   "btc-mainnet-fullnode",
+			Id:     int(common.BTCService),
+			RpcUrl: "http://127.0.0.1:1",
+		}},
 	}
 }
 

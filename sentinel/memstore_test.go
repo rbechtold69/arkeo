@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cometbft/cometbft/libs/log"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -112,12 +113,15 @@ func (s *MemStoreSuite) TestMemStoreWithAuth() {
 		authHeader := req.Header.Get(QueryArkAuth)
 		if authHeader != "" {
 			authChecked = true
-			// Verify auth header format
-			parts := strings.Split(authHeader, ":")
-			require.Len(s.T(), parts, 4)
-			require.Equal(s.T(), "12345", parts[0]) // contract ID
-			require.Equal(s.T(), "1", parts[1])     // nonce
-			require.Equal(s.T(), "test-chain", parts[2]) // chain ID
+			// Verify the header with the same parser used by the sentinel.
+			auth, err := parseArkAuth(authHeader, "test-chain")
+			if !assert.NoError(s.T(), err) {
+				rw.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			assert.EqualValues(s.T(), 12345, auth.ContractId)
+			assert.EqualValues(s.T(), 1, auth.Nonce)
+			assert.NotEmpty(s.T(), auth.Signature)
 		}
 		
 		// Return a mock contract
