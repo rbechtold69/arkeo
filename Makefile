@@ -343,7 +343,7 @@ release-dry-run-cross:
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
 		-f releaser/.goreleaser-arkeo-cross.yaml \
-		--clean --skip=validate --skip=publish
+		--snapshot --clean --skip=validate --skip=publish
 
 release-dry-run:
 	$(DOCKER) run \
@@ -358,7 +358,7 @@ release-dry-run:
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser:${GORELEASER_VERSION} \
 		-f releaser/.goreleaser-arkeo.yaml \
-		--clean --skip=validate --skip=publish
+		--snapshot --clean --skip=validate --skip=publish
 
 sentinel-release-dry-run-cross:
 	$(DOCKER) run \
@@ -374,7 +374,7 @@ sentinel-release-dry-run-cross:
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
 		-f releaser/.goreleaser-sentinel-cross.yaml \
-		--clean --skip=validate --skip=publish
+		--snapshot --clean --skip=validate --skip=publish
 
 sentinel-release-dry-run:
 	$(DOCKER) run \
@@ -390,7 +390,7 @@ sentinel-release-dry-run:
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser:${GORELEASER_VERSION} \
 		-f releaser/.goreleaser-sentinel.yaml \
-		--clean --skip=validate --skip=publish
+		--snapshot --clean --skip=validate --skip=publish
 
 directory-release-dry-run-cross:
 	$(DOCKER) run \
@@ -406,7 +406,7 @@ directory-release-dry-run-cross:
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
 		-f releaser/.goreleaser-directory-cross.yaml \
-		--clean --skip=validate --skip=publish
+		--snapshot --clean --skip=validate --skip=publish
 
 directory-release-dry-run:
 	$(DOCKER) run \
@@ -422,7 +422,7 @@ directory-release-dry-run:
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser:${GORELEASER_VERSION} \
 		-f releaser/.goreleaser-directory.yaml \
-		--clean --skip=validate --skip=publish
+		--snapshot --clean --skip=validate --skip=publish
 
 
 ########################################################################################

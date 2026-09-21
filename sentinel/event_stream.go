@@ -197,16 +197,8 @@ func (p Proxy) handleContractSettlementEvent(result tmCoreTypes.ResultEvent) {
 
 	spender := contract.GetSpender()
 	newClaim := NewClaim(contract.Id, spender, evt.Nonce, "")
-	currClaim, err := p.ClaimStore.Get(newClaim.Key())
-	if err != nil {
-		p.logger.Error("failed to get claim", "error", err)
-		return
-	}
-	if currClaim.Nonce == newClaim.Nonce {
-		currClaim.Claimed = true
-		if err := p.ClaimStore.Set(currClaim); err != nil {
-			p.logger.Error("failed to set claimed", "error", err)
-		}
+	if _, err := p.ClaimStore.MarkClaimed(newClaim.ContractId, newClaim.Nonce); err != nil {
+		p.logger.Error("failed to mark claim settled", "error", err)
 	}
 }
 
@@ -304,16 +296,8 @@ func (p Proxy) handleNewBlockHeaderEvent(result tmCoreTypes.ResultEvent) {
 			}
 			spender := evt.Contract.GetSpender()
 			newClaim := NewClaim(evt.Contract.Id, spender, evt.Contract.Nonce, "")
-			currClaim, err := p.ClaimStore.Get(newClaim.Key())
-			if err != nil {
-				p.logger.Error("failed to get claim", "error", err)
-				continue
-			}
-			if currClaim.Nonce == newClaim.Nonce {
-				currClaim.Claimed = true
-				if err := p.ClaimStore.Set(currClaim); err != nil {
-					p.logger.Error("failed to set claimed", "error", err)
-				}
+			if _, err := p.ClaimStore.MarkClaimed(newClaim.ContractId, newClaim.Nonce); err != nil {
+				p.logger.Error("failed to mark claim settled", "error", err)
 			}
 		}
 	}

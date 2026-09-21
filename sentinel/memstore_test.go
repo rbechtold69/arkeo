@@ -52,7 +52,7 @@ func (s *MemStoreSuite) TestMemStore() {
 		switch {
 		case strings.HasSuffix(req.RequestURI, expectedURI):
 			httpTestHandler(s.T(), rw, fmt.Sprintf(`
-{ "contract": {
+{ "contract": { "id": "1",
 				"provider_pub_key": "%s",
 				"service": 1,
 				"client": "%s",
@@ -126,7 +126,7 @@ func (s *MemStoreSuite) TestMemStoreWithAuth() {
 
 		// Return a mock contract
 		httpTestHandler(s.T(), rw, fmt.Sprintf(`
-{ "contract": {
+{ "contract": { "id": "1",
 				"provider_pub_key": "%s",
 				"service": 1,
 				"client": "%s",

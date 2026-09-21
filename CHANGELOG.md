@@ -1,5 +1,9 @@
 ## Unreleased — institutional readiness candidate
 
+- Atomically reserve claim nonces and compare settlement updates against current state.
+- Enforce authorized spenders, overflow-safe payment limits and bounded registry reads.
+- Validate contract accounting responses and synchronize height updates.
+
 - Require an operator token before marking sentinel claims as settled.
 - Generate parser-compatible PAYG headers and stop on nonce persistence failures.
 - Stop trusting arbitrary forwarding headers for rate-limit identity.

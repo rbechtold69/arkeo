@@ -4,13 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 
-	"golang.org/x/crypto/sha3"
 	"golang.org/x/time/rate"
 
 	"github.com/arkeonetwork/arkeo/common"
@@ -230,48 +231,9 @@ func (p Proxy) auth(next http.Handler) http.Handler {
 		aa, err := p.fetchArkAuth(r)
 		remoteAddr := p.getRemoteAddr(r)
 		if err != nil {
-			// Attempt to fetch contract id from query
-			args := r.URL.Query()
-			contractIdStr := args.Get("contract_id")
-			// Try "arkauth" param (could just be a contractId)
-			if contractIdStr == "" {
-				arkauthParam := args.Get(QueryArkAuth)
-				parts := strings.SplitN(arkauthParam, ":", 2)
-				if len(parts) > 0 {
-					contractIdStr = parts[0]
-				}
-			}
-			contractId, _ := strconv.ParseUint(contractIdStr, 10, 64)
-			contract, cErr := p.MemStore.Get(strconv.FormatUint(contractId, 10))
-			whitelisted := false
-			if cErr == nil && !contract.Client.IsEmpty() {
-				conf, _ := p.ContractConfigStore.Get(contract.Id)
-				addr := remoteAddr
-				if strings.Contains(addr, ":") {
-					addr, _, _ = strings.Cut(addr, ":")
-				}
-				for _, ip := range conf.WhitelistIPAddresses {
-					if strings.EqualFold(addr, ip) {
-						whitelisted = true
-						break
-					}
-				}
-			}
-			if cErr == nil && contract.IsOpenAuthorization() && whitelisted {
-				w.Header().Set("tier", "paid")
-				next.ServeHTTP(w, r)
-				return
-			}
-			// Otherwise, as before:
-			p.logger.Error("failed to parse ark auth", "error", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "invalid payment authorization", http.StatusBadRequest)
 			return
 		}
-
-		p.logger.Info("DEBUG: ArkAuth parsed",
-			"raw", r.URL.Query().Get(QueryArkAuth),
-			"arkAuth", aa.String(),
-		)
 
 		var contract types.Contract
 		if aa.ContractId > 0 {
@@ -305,9 +267,6 @@ func (p Proxy) auth(next http.Handler) http.Handler {
 
 				// Check IP whitelist
 				addr := remoteAddr
-				if strings.Contains(addr, ":") {
-					addr, _, _ = strings.Cut(addr, ":")
-				}
 				for _, ip := range conf.WhitelistIPAddresses {
 					if strings.EqualFold(addr, ip) {
 						whitelisted = true
@@ -317,7 +276,8 @@ func (p Proxy) auth(next http.Handler) http.Handler {
 
 				if len(conf.WhitelistIPAddresses) > 0 && !whitelisted {
 					p.logger.Info("DEBUG: IP not in contract whitelist, falling through to free tier", "addr", addr)
-					// Do not return; fall through to free tier logic
+					http.Error(w, "client address is not authorized for this contract", http.StatusForbidden)
+					return
 				}
 
 			}
@@ -367,16 +327,8 @@ func (p Proxy) auth(next http.Handler) http.Handler {
 					return
 				}
 			} else {
-				// Legacy logging fallback
-				ser, serr := common.NewService(serviceName)
-				p.logger.Info("DEBUG: service not in registry; legacy parse",
-					"serviceName", serviceName,
-					"contract_id", contract.Id,
-					"contract_service_enum", contract.Service,
-					"parsed_service_enum", ser,
-					"new_service_err", serr,
-				)
-				// allow if registry doesn’t know it (dynamic addition)
+				http.Error(w, "unknown service", http.StatusUnauthorized)
+				return
 			}
 
 			httpCode, tierErr := p.paidTier(aa, remoteAddr)
@@ -462,10 +414,13 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 		return http.StatusInternalServerError, fmt.Errorf("internal server error: %w", err)
 	}
 
-	// Ensure spender (client) is recorded in the claim even when arkauth is 3-part.
-	if aa.Spender.IsEmpty() {
-		aa.Spender = contract.Client
-		p.logger.Debug("paidTier: inferred spender from contract client", "spender", aa.Spender.String())
+	if contract.Id != aa.ContractId || !contract.Provider.Equals(p.Config.ProviderPubKey) {
+		return http.StatusUnauthorized, fmt.Errorf("contract is not served by this provider")
+	}
+	expectedSpender := contract.GetSpender()
+	if aa.Spender.IsEmpty() { aa.Spender = expectedSpender }
+	if !aa.Spender.Equals(expectedSpender) {
+		return http.StatusUnauthorized, fmt.Errorf("unauthorized contract spender")
 	}
 
 	// Check if the contract has expired (based on current chain height).
@@ -474,9 +429,15 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 		return http.StatusPaymentRequired, fmt.Errorf("open a contract")
 	}
 
-	// check if we've exceeded the total number of pay-as-you-go queries
 	if contract.IsPayAsYouGo() {
-		if contract.Deposit.IsNil() || contract.Deposit.LT(cosmos.NewInt(aa.Nonce*contract.Rate.Amount.Int64())) {
+		if aa.Nonce <= 0 || aa.Nonce <= contract.Nonce {
+			return http.StatusBadRequest, fmt.Errorf("nonce must increase")
+		}
+		if contract.Deposit.IsNil() || contract.Rate.Amount.IsNil() || contract.Rate.Amount.IsNegative() {
+			return http.StatusPaymentRequired, fmt.Errorf("invalid contract balance")
+		}
+		cost := new(big.Int).Mul(big.NewInt(aa.Nonce), contract.Rate.Amount.BigInt())
+		if cost.Cmp(contract.Deposit.BigInt()) > 0 {
 			return http.StatusPaymentRequired, fmt.Errorf("contract spent")
 		}
 	}
@@ -488,7 +449,7 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 
 	// For open authorization (subscription) contracts, skip PAYG nonce/signature tracking.
 	// Open contracts do not require per-request client signatures or nonce/accounting.
-	if contract.IsOpenAuthorization() {
+	if contract.IsSubscription() && contract.IsOpenAuthorization() {
 		p.logger.Debug("paidTier: open authorization contract; skipping claim enqueue",
 			"contract_id", contract.Id,
 			"nonce", aa.Nonce,
@@ -498,84 +459,25 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 		return http.StatusOK, nil
 	}
 
-	// Optional self-verify so only claimable entries are stored.
-	// Preferred: chain-style SHA-256("<cid>:<nonce>:")
-	// Compat: raw preimage, Keccak(preimage), and EIP-191 personal_sign over preimage.
-	{
-		pre := fmt.Sprintf("%d:%d:", aa.ContractId, aa.Nonce)
-		digest := sha256.Sum256([]byte(pre))
-
-		pk, err := cosmos.GetPubKeyFromBech32(cosmos.Bech32PubKeyTypeAccPub, aa.Spender.String())
-		if err != nil {
-			return http.StatusUnauthorized, fmt.Errorf("invalid client pubkey: %w", err)
-		}
-
-		// 1) chain preferred: SHA-256(preimage)
-		ok := pk.VerifySignature(digest[:], aa.Signature)
-
-		// 2) compat: raw preimage
-		if !ok {
-			ok = pk.VerifySignature([]byte(pre), aa.Signature)
-		}
-
-		// 3) compat: keccak256(preimage)
-		if !ok {
-			k := sha3.NewLegacyKeccak256()
-			k.Write([]byte(pre))
-			ok = pk.VerifySignature(k.Sum(nil), aa.Signature)
-		}
-
-		// 4) compat: EIP-191 personal_sign (Ethereum prefix)
-		if !ok {
-			prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(pre))
-			k := sha3.NewLegacyKeccak256()
-			k.Write([]byte(prefix))
-			k.Write([]byte(pre))
-			ok = pk.VerifySignature(k.Sum(nil), aa.Signature)
-		}
-
-		if !ok {
-			return http.StatusUnauthorized, fmt.Errorf("invalid signature for client")
-		}
+	// Accept only signature forms accepted by on-chain settlement.
+	pk, err := cosmos.GetPubKeyFromBech32(cosmos.Bech32PubKeyTypeAccPub, expectedSpender.String())
+	if err != nil || len(aa.Signature) != 64 {
+		return http.StatusUnauthorized, fmt.Errorf("invalid client signature")
 	}
-
-	// Create or update the claim for this contract request:
-	// - Build a new claim using the provided contract ID, spender, nonce, and signature.
-	// - If a claim already exists for this contract, fetch it to check for replay or out-of-order requests.
-	// - If the incoming nonce is not strictly greater than the stored nonce, reject the request (prevent replay or duplicate).
-	sig := hex.EncodeToString(aa.Signature)
-	claim := NewClaim(aa.ContractId, aa.Spender, aa.Nonce, sig)
-	if p.ClaimStore.Has(key) {
-		var err error
-		claim, err = p.ClaimStore.Get(key)
-		if err != nil {
-			return http.StatusInternalServerError, fmt.Errorf("internal server error: %w", err)
-		}
-		if claim.Nonce >= aa.Nonce {
-			return http.StatusBadRequest, fmt.Errorf("bad nonce (%d/%d)", aa.Nonce, claim.Nonce)
-		}
+	valid := false
+	for _, chainID := range []string{"", p.Config.ArkeoAuthChainId} {
+		pre := []byte(fmt.Sprintf("%d:%d:%s", aa.ContractId, aa.Nonce, chainID))
+		digest := sha256.Sum256(pre)
+		if pk.VerifySignature(pre, aa.Signature) || pk.VerifySignature(digest[:], aa.Signature) { valid = true; break }
 	}
-
-	// Update claim and contract state for Pay-As-You-Go contracts.
-	//
-	// - Stores the new nonce and signature in the claim store (for settlement and anti-replay).
-	// - Marks the claim as unclaimed (pending batch settlement).
-	// - Updates the contract's nonce in memory to track usage progression.
-	// - Calculates and logs usage stats (used/remaining deposit, per-query cost).
+	if !valid { return http.StatusUnauthorized, fmt.Errorf("invalid signature for client") }
+	claim := NewClaim(aa.ContractId, expectedSpender, aa.Nonce, hex.EncodeToString(aa.Signature))
 	claim.Provider = p.Config.ProviderPubKey
-	claim.Spender = aa.Spender
-	claim.Nonce = aa.Nonce
-	claim.Signature = sig
-	claim.Claimed = false
-	if err := p.ClaimStore.Set(claim); err != nil {
-		p.logger.Error("paidTier: failed to persist claim",
-			"contract_id", claim.ContractId,
-			"nonce", claim.Nonce,
-			"spender", claim.Spender.String(),
-			"error", err,
-		)
-		return http.StatusInternalServerError, fmt.Errorf("internal server error: %w", err)
+	if err := p.ClaimStore.Accept(claim); err != nil {
+		if errors.Is(err, ErrClaimNonce) { return http.StatusBadRequest, err }
+		return http.StatusInternalServerError, fmt.Errorf("claim persistence failed")
 	}
+
 	p.logger.Info("paidTier: claim stored",
 		"contract_id", claim.ContractId,
 		"nonce", claim.Nonce,
@@ -584,19 +486,6 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 	)
 	contract.Nonce = aa.Nonce
 	p.MemStore.Put(contract)
-
-	used := contract.Nonce * contract.Rate.Amount.Int64()
-	remaining := contract.Deposit.Int64() - used
-
-	p.logger.Debug("Contract Usage: ",
-		"contract_id", contract.Id,
-		"nonce", contract.Nonce,
-		"deposit", contract.Deposit.Int64(),
-		"used", used,
-		"remaining", remaining,
-		"cost_per_query", contract.Rate.Amount.Int64(),
-		"denom", contract.Rate.Denom,
-	)
 
 	return http.StatusOK, nil
 }

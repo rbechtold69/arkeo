@@ -6,7 +6,7 @@ RUN apt-get update \
     curl git jq make protobuf-compiler xz-utils sudo postgresql postgresql-contrib python3-pip \
     && rm -rf /var/cache/apt/lists \
     && go install mvdan.cc/gofumpt@v0.3.0 \
-    && go install github.com/jackc/tern/v2@latest
+    && go install github.com/jackc/tern/v2@v2.2.3
 
 ENV GOBIN=/go/bin
 ENV GOPATH=/go

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -156,30 +157,9 @@ func loadProxies(config conf.Configuration, logger log.Logger, serviceIDs map[st
 func loadServiceRegistry(config conf.Configuration, logger log.Logger) map[string]int32 {
 	registry := make(map[string]int32)
 
-	// Attempt to pull from REST gateway if available.
 	if config.HubProviderURI != "" {
-		reqURL := strings.TrimRight(config.HubProviderURI, "/") + "/arkeo/services"
-		resp, err := http.Get(reqURL) //nolint:gosec // expected simple GET to local/known endpoint
-		if err == nil && resp.StatusCode == http.StatusOK {
-			defer resp.Body.Close()
-			var payload struct {
-				Services []struct {
-					ServiceId int32  `json:"service_id"`
-					Name      string `json:"name"`
-				} `json:"services"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
-				for _, svc := range payload.Services {
-					registry[strings.ToLower(svc.Name)] = svc.ServiceId
-				}
-			} else {
-				logger.Error("DEBUG: failed to decode registry response", "err", err)
-			}
-		} else if err != nil {
-			logger.Error("DEBUG: failed to fetch registry", "err", err)
-		} else {
-			logger.Error("DEBUG: registry fetch non-200", "status", resp.StatusCode)
-		}
+		client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
+		registry = fetchServiceRegistry(config.HubProviderURI, client, logger)
 	}
 
 	// Fallback to static map if empty.
@@ -189,6 +169,27 @@ func loadServiceRegistry(config conf.Configuration, logger log.Logger) map[strin
 		}
 	}
 
+	return registry
+}
+
+// Fetches operator-configured registry data with bounded I/O and no credential redirects.
+func fetchServiceRegistry(base string, client *http.Client, logger log.Logger) map[string]int32 {
+	registry := make(map[string]int32)
+	resp, err := client.Get(strings.TrimRight(base, "/") + "/arkeo/services")
+	if err != nil { logger.Error("service registry unavailable"); return registry }
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK { return registry }
+	const limit = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil || len(body) > limit { return registry }
+	var payload struct { Services []struct { ServiceId int32 `json:"service_id"`; Name string `json:"name"` } `json:"services"` }
+	if json.Unmarshal(body, &payload) != nil { return registry }
+	for _, svc := range payload.Services {
+		name := strings.ToLower(strings.TrimSpace(svc.Name))
+		if name == "" || svc.ServiceId <= 0 || strings.ContainsAny(name, "/?# ") { return map[string]int32{} }
+		if _, duplicate := registry[name]; duplicate { return map[string]int32{} }
+		registry[name] = svc.ServiceId
+	}
 	return registry
 }
 
@@ -500,7 +501,7 @@ func (p *Proxy) handleOpenClaims(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if contract.IsExpired(p.MemStore.GetHeight()) {
+		if contract.IsSettled(p.MemStore.GetHeight()) {
 			_ = p.ClaimStore.Remove(claim.Key()) // clearly expired
 			p.logger.Info("open-claims: claim expired and removed",
 				"contract_id", claim.ContractId,
@@ -544,23 +545,17 @@ func (p *Proxy) handleMarkClaimed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated := 0
-	claims := p.ClaimStore.List()
-	for i := range claims {
-		c := claims[i]
-		if c.ContractId == req.ContractID && uint64(c.Nonce) == req.Nonce {
-			// flip the bit; do NOT remove — we want highestNonce to remain monotonic
-			if !c.Claimed {
-				c.Claimed = true
-				if err := p.ClaimStore.Set(c); err != nil { // <-- Set instead of Put
-					respondWithError(w, "persist failed", http.StatusInternalServerError)
-					return
-				}
-			}
-			updated = 1
-			break
-		}
+	if req.ContractID == 0 || req.Nonce > math.MaxInt64 {
+		respondWithError(w, "invalid contract or nonce", http.StatusBadRequest)
+		return
 	}
+	matched, err := p.ClaimStore.MarkClaimed(req.ContractID, int64(req.Nonce))
+	if err != nil {
+		respondWithError(w, "persist failed", http.StatusInternalServerError)
+		return
+	}
+	updated := 0
+	if matched { updated = 1 }
 
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "updated": updated})
 }
