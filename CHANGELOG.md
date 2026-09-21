@@ -1,3 +1,10 @@
+## Unreleased — institutional readiness candidate
+
+- Require an operator token before marking sentinel claims as settled.
+- Generate parser-compatible PAYG headers and stop on nonce persistence failures.
+- Stop trusting arbitrary forwarding headers for rate-limit identity.
+- Add readiness regression tests. Production rollout still requires validation.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

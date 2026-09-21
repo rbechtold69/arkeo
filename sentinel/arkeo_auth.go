@@ -41,7 +41,7 @@ func NewArkeoAuthManager(contractId uint64, chainId string, mnemonic string, non
 		lastNonce, err = nonceStore.Get(contractId)
 		if err != nil {
 			logger.Error("failed to load nonce from store", "error", err)
-			// Continue with nonce 0 if load fails
+			return nil, fmt.Errorf("failed to load nonce from store: %w", err)
 		} else {
 			logger.Info("loaded nonce from store", "contractId", contractId, "nonce", lastNonce)
 		}
@@ -67,7 +67,7 @@ func (am *ArkeoAuthManager) GenerateAuthHeader() (string, error) {
 	if am.nonceStore != nil {
 		if err := am.nonceStore.Set(am.contractId, am.nonce); err != nil {
 			am.logger.Error("failed to persist nonce", "error", err)
-			// Continue even if persistence fails
+			return "", fmt.Errorf("failed to persist nonce: %w", err)
 		}
 	}
 

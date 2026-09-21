@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/time/rate"
 	"net/http"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,7 +49,7 @@ func (aa ArkAuth) String() string {
 }
 
 func GenerateArkAuthString(contractId uint64, nonce int64, signature []byte, chainId string) string {
-	return fmt.Sprintf("%s:%s", GenerateMessageToSign(contractId, nonce, chainId), hex.EncodeToString(signature))
+	return fmt.Sprintf("%d:%d:%s", contractId, nonce, hex.EncodeToString(signature))
 }
 
 func GenerateMessageToSign(contractId uint64, nonce int64, chainId string) string {
@@ -420,20 +421,12 @@ const (
 )
 
 func (p Proxy) getRemoteAddr(r *http.Request) string {
-	realIP := r.Header.Get(xRealIPName)
-	if realIP != "" {
-		return realIP
+	// Do not accept client-controlled forwarding headers as a rate-limit identity.
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
 	}
-	forwardIP := r.Header.Get(forwardHeaderName)
-	if forwardIP != "" {
-		return forwardIP
-	}
-	// Extract IP from "IP:port"
-	ip := r.RemoteAddr
-	if strings.Contains(ip, ":") {
-		ip, _, _ = strings.Cut(ip, ":")
-	}
-	return ip
+	return r.RemoteAddr
 }
 
 func (p Proxy) isRateLimited(contractId uint64, key string, limitTokens int, windowSeconds int) bool {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -611,6 +612,15 @@ func (p *Proxy) handleOpenClaims(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) handleMarkClaimed(w http.ResponseWriter, r *http.Request) {
+	// This mutates payout bookkeeping and is not a public data endpoint.
+	// A loopback check alone is unsafe when a reverse proxy runs on this host.
+	expected := os.Getenv("SENTINEL_ADMIN_TOKEN")
+	provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if len(expected) < 32 || subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) != 1 {
+		respondWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	w.Header().Set("Content-Type", "application/json")
 
 	type markReq struct {
@@ -816,7 +826,7 @@ func (p *Proxy) logrusMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		logger := logrus.WithFields(logrus.Fields{
 			"method": r.Method,
-			"url":    r.URL.String(),
+			"path":   r.URL.Path, // Query parameters can contain payment authorizations.
 			"remote": p.getRemoteAddr(r),
 		})
 		next.ServeHTTP(w, r)

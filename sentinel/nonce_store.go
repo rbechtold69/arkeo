@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 type NonceStore struct {
@@ -86,7 +87,7 @@ func (s *NonceStore) Set(contractId uint64, nonce int64) error {
 		return err
 	}
 	
-	if err := s.db.Put([]byte(key), buf, nil); err != nil {
+	if err := s.db.Put([]byte(key), buf, &opt.WriteOptions{Sync: true}); err != nil {
 		s.logger.Error().Err(err).Msg("fail to set nonce record")
 		return err
 	}
