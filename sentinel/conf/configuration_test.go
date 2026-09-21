@@ -1,25 +1,25 @@
 package conf
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestConfiguration(t *testing.T) {
-	os.Setenv("MONIKER", "monkey")
-	os.Setenv("WEBSITE", "webby")
-	os.Setenv("DESCRIPTION", "dezy")
-	os.Setenv("LOCATION", "locy")
-	os.Setenv("PORT", "4000")
-	os.Setenv("SOURCE_CHAIN", "sourcey")
-	os.Setenv("EVENT_STREAM_HOST", "hosty")
-	os.Setenv("PROVIDER_PUBKEY", "cosmospub1addwnpepqg3523h7e7ggeh6na2lsde6s394tqxnvufsz0urld6zwl8687ue9c3dasgu")
-	os.Setenv("FREE_RATE_LIMIT", "99")
-	os.Setenv("CLAIM_STORE_LOCATION", "clammy")
-	os.Setenv("CONTRACT_CONFIG_STORE_LOCATION", "configy")
-	os.Setenv("PROVIDER_CONFIG_STORE_LOCATION", "providy")
+	t.Setenv("PROVIDER_HUB_URI", "http://127.0.0.1:1317")
+	t.Setenv("MONIKER", "monkey")
+	t.Setenv("WEBSITE", "webby")
+	t.Setenv("DESCRIPTION", "dezy")
+	t.Setenv("LOCATION", "locy")
+	t.Setenv("PORT", "4000")
+	t.Setenv("SOURCE_CHAIN", "sourcey")
+	t.Setenv("EVENT_STREAM_HOST", "hosty")
+	t.Setenv("PROVIDER_PUBKEY", "cosmospub1addwnpepqg3523h7e7ggeh6na2lsde6s394tqxnvufsz0urld6zwl8687ue9c3dasgu")
+	t.Setenv("FREE_RATE_LIMIT", "99")
+	t.Setenv("CLAIM_STORE_LOCATION", "clammy")
+	t.Setenv("CONTRACT_CONFIG_STORE_LOCATION", "configy")
+	t.Setenv("PROVIDER_CONFIG_STORE_LOCATION", "providy")
 
 	config := NewConfiguration()
 
