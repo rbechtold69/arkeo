@@ -21,17 +21,22 @@ func newTestConfig() conf.Configuration {
 	c := cosmos.GetConfig()
 	c.SetBech32PrefixForAccount(app.AccountAddressPrefix, app.AccountAddressPrefix+"pub")
 	return conf.Configuration{
-		Moniker:            "Testy McTestface",
-		Website:            "testing.com",
-		Description:        "the best testnet ever",
-		Location:           "100,100",
-		Port:               "3636",
-		SourceChain:        "http://localhost:1317", // this should point to arkeo rpc endpoints, but we can ignore for testing
-		EventStreamHost:    "localhost",
-		ProviderPubKey:     types.GetRandomPubKey(),
-		FreeTierRateLimit:  100,
-		ClaimStoreLocation: "",
+		Moniker:             "Testy McTestface",
+		Website:             "testing.com",
+		Description:         "the best testnet ever",
+		Location:            "100,100",
+		Port:                "3636",
+		SourceChain:         "http://localhost:1317", // this should point to arkeo rpc endpoints, but we can ignore for testing
+		EventStreamHost:     "localhost",
+		ProviderPubKey:      types.GetRandomPubKey(),
+		FreeTierRateLimit:   100,
+		ClaimStoreLocation:  "",
 		ArkeoAuthContractId: 0, // No auth for tests
+		Services: []conf.ServiceConfig{{
+			Name:   "btc-mainnet-fullnode",
+			Id:     int(common.BTCService),
+			RpcUrl: "http://127.0.0.1:1",
+		}},
 	}
 }
 
@@ -163,10 +168,11 @@ func TestHandleHandleContractSettlementEvent(t *testing.T) {
 	testConfig := newTestConfig()
 	proxy, err := NewProxy(testConfig)
 	require.NoError(t, err)
+	clientPubKey, clientKey := newSigningTestClient(t)
 	inputContract := types.Contract{
 		Provider:           testConfig.ProviderPubKey,
 		Service:            common.BTCService,
-		Client:             types.GetRandomPubKey(),
+		Client:             clientPubKey,
 		Delegate:           common.EmptyPubKey,
 		Type:               types.ContractType_PAY_AS_YOU_GO,
 		Height:             100,
@@ -196,6 +202,7 @@ func TestHandleHandleContractSettlementEvent(t *testing.T) {
 		Spender:    inputContract.Client,
 		Nonce:      10,
 	}
+	signTestArkAuth(t, clientKey, &arkAuth)
 	_, err = proxy.paidTier(arkAuth, "")
 	require.NoError(t, err)
 

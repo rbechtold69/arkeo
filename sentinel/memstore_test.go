@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cometbft/cometbft/libs/log"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -44,14 +45,14 @@ func httpTestHandler(t *testing.T, rw http.ResponseWriter, content string) {
 func (s *MemStoreSuite) TestMemStore() {
 	// Use a dynamic test pubkey to avoid hardcoding invalid ones
 	testPK := types.GetRandomPubKey()
-	
+
 	// Recreate server with the dynamic pubkey
 	s.server = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		expectedURI := fmt.Sprintf("/arkeo/contract/%s/arkeo-mainnet/%s", testPK.String(), testPK.String())
 		switch {
 		case strings.HasSuffix(req.RequestURI, expectedURI):
 			httpTestHandler(s.T(), rw, fmt.Sprintf(`
-{ "contract": {
+{ "contract": { "id": "1",
 				"provider_pub_key": "%s",
 				"service": 1,
 				"client": "%s",
@@ -70,7 +71,7 @@ func (s *MemStoreSuite) TestMemStore() {
 		}
 	}))
 	defer s.server.Close()
-	
+
 	var err error
 	baseURL := fmt.Sprintf("http://%s", s.server.Listener.Addr().String())
 	mem := NewMemStore(baseURL, nil, log.NewTMLogger(log.NewSyncWriter(os.Stdout)))
@@ -105,24 +106,27 @@ func (s *MemStoreSuite) TestMemStore() {
 func (s *MemStoreSuite) TestMemStoreWithAuth() {
 	// Use a dynamic test pubkey
 	testPK := types.GetRandomPubKey()
-	
+
 	// Create a test server that verifies auth header
 	authChecked := false
 	testServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		authHeader := req.Header.Get(QueryArkAuth)
 		if authHeader != "" {
 			authChecked = true
-			// Verify auth header format
-			parts := strings.Split(authHeader, ":")
-			require.Len(s.T(), parts, 4)
-			require.Equal(s.T(), "12345", parts[0]) // contract ID
-			require.Equal(s.T(), "1", parts[1])     // nonce
-			require.Equal(s.T(), "test-chain", parts[2]) // chain ID
+			// Verify the header with the same parser used by the sentinel.
+			auth, err := parseArkAuth(authHeader, "test-chain")
+			if !assert.NoError(s.T(), err) {
+				rw.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			assert.EqualValues(s.T(), 12345, auth.ContractId)
+			assert.EqualValues(s.T(), 1, auth.Nonce)
+			assert.NotEmpty(s.T(), auth.Signature)
 		}
-		
+
 		// Return a mock contract
 		httpTestHandler(s.T(), rw, fmt.Sprintf(`
-{ "contract": {
+{ "contract": { "id": "1",
 				"provider_pub_key": "%s",
 				"service": 1,
 				"client": "%s",
@@ -144,7 +148,7 @@ func (s *MemStoreSuite) TestMemStoreWithAuth() {
 	nonceStore, err := NewNonceStore("")
 	require.NoError(s.T(), err)
 	defer nonceStore.Close()
-	
+
 	testMnemonic := strings.Repeat("dog ", 23) + "fossil"
 	authManager, err := NewArkeoAuthManager(12345, "test-chain", testMnemonic, nonceStore, logger)
 	require.NoError(s.T(), err)
@@ -157,7 +161,7 @@ func (s *MemStoreSuite) TestMemStoreWithAuth() {
 	contract, err := mem.Get(key)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), contract.Rate.Amount.Int64(), int64(3))
-	
+
 	// Verify auth header was checked
 	require.True(s.T(), authChecked, "Auth header should have been sent")
 }

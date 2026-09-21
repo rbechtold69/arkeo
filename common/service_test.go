@@ -16,5 +16,6 @@ func TestString(t *testing.T) {
 	service = ETHService
 	require.Equal(t, "eth-mainnet-fullnode", service.String())
 	service = 600
-	require.Equal(t, "unknown", service.String())
+	// Dynamically registered IDs retain their identity outside the legacy map.
+	require.Equal(t, "service-600", service.String())
 }

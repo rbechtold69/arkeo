@@ -2,6 +2,7 @@ package sentinel
 
 import (
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/cometbft/cometbft/libs/log"
@@ -41,7 +42,7 @@ func NewArkeoAuthManager(contractId uint64, chainId string, mnemonic string, non
 		lastNonce, err = nonceStore.Get(contractId)
 		if err != nil {
 			logger.Error("failed to load nonce from store", "error", err)
-			// Continue with nonce 0 if load fails
+			return nil, fmt.Errorf("failed to load nonce from store: %w", err)
 		} else {
 			logger.Info("loaded nonce from store", "contractId", contractId, "nonce", lastNonce)
 		}
@@ -61,14 +62,17 @@ func (am *ArkeoAuthManager) GenerateAuthHeader() (string, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	am.nonce++
-
-	// Persist new nonce
 	if am.nonceStore != nil {
-		if err := am.nonceStore.Set(am.contractId, am.nonce); err != nil {
-			am.logger.Error("failed to persist nonce", "error", err)
-			// Continue even if persistence fails
+		next, err := am.nonceStore.ReserveAfter(am.contractId, am.nonce)
+		if err != nil {
+			return "", fmt.Errorf("failed to reserve nonce: %w", err)
 		}
+		am.nonce = next
+	} else {
+		if am.nonce == math.MaxInt64 {
+			return "", fmt.Errorf("nonce exhausted")
+		}
+		am.nonce++
 	}
 
 	// Generate message to sign (using existing function from sentinel_auth.go)

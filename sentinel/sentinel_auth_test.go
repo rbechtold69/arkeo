@@ -1,7 +1,6 @@
 package sentinel
 
 import (
-	"github.com/gorilla/mux"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,12 +10,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/arkeonetwork/arkeo/common"
-	"github.com/arkeonetwork/arkeo/sentinel/conf"
-	"github.com/arkeonetwork/arkeo/x/arkeo/types"
+	"github.com/gorilla/mux"
+
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/arkeonetwork/arkeo/common"
+	"github.com/arkeonetwork/arkeo/sentinel/conf"
+	"github.com/arkeonetwork/arkeo/x/arkeo/types"
 )
 
 // If both files define testMnemonic, keep only one definition.
@@ -83,13 +85,12 @@ func TestArkeoAuthManager_GenerateAuthHeader(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, authHeader1)
 
-	// Verify format: contractId:nonce:chainId:signature
+	// Verify the parser-supported format: contractId:nonce:signature
 	parts := strings.Split(authHeader1, ":")
-	assert.Len(t, parts, 4)
+	assert.Len(t, parts, 3)
 	assert.Equal(t, "12345", parts[0])
 	assert.Equal(t, "1", parts[1])
-	assert.Equal(t, testChainId, parts[2])
-	assert.NotEmpty(t, parts[3]) // signature
+	assert.NotEmpty(t, parts[2]) // signature
 
 	// Generate second auth header - nonce should increment
 	authHeader2, err := am.GenerateAuthHeader()
@@ -195,7 +196,7 @@ func TestArkeoAuthManager_PublicKey(t *testing.T) {
 
 	// Extract signature and verify format
 	parts := strings.Split(authHeader1, ":")
-	assert.Len(t, parts, 4)
+	assert.Len(t, parts, 3)
 }
 
 func TestArkeoAuthManager_MultipleContracts(t *testing.T) {
@@ -242,9 +243,9 @@ func TestHandleActiveContract_WithAuth(t *testing.T) {
 			authChecked = true
 			// Verify auth header format
 			parts := strings.Split(receivedAuthHeader, ":")
-			assert.Len(t, parts, 4)
-			assert.Equal(t, "12345", parts[0])      // contract ID
-			assert.Equal(t, "arkeo-test", parts[2]) // chain ID
+			assert.Len(t, parts, 3)
+			assert.Equal(t, "12345", parts[0]) // contract ID
+			assert.NotEmpty(t, parts[2])       // signature; chain ID is supplied by the sentinel
 		}
 
 		// Return a mock response

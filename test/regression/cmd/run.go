@@ -290,7 +290,7 @@ func run(path string) error {
 		},
 		{
 			name:  "sentinel",
-			cmd:   []string{"/regtest/cover-sentinel"},
+			cmd:   []string{"/regtest/cover-sentinel", "--config", "/app/test/regression/sentinel.yaml"},
 			ports: []string{"3636"},
 			env: []string{
 				"GOCOVERDIR=/mnt/coverage",
@@ -302,6 +302,7 @@ func run(path string) error {
 				"LOCATION=n/a",
 				"PORT=3636",
 				"SOURCE_CHAIN=http://localhost:1317",
+				"PROVIDER_HUB_URI=http://localhost:1317",
 				"EVENT_STREAM_HOST=localhost:26657",
 				"FREE_RATE_LIMIT=10",
 				"CLAIM_STORE_LOCATION=/regtest/.arkeo/claims",
@@ -436,6 +437,7 @@ func runProcess(proc process, stderrLines chan string) *exec.Cmd {
 		process = exec.Command(proc.cmd[0], proc.cmd[1:]...) // #nosec G204
 	}
 	process.Env = append(os.Environ(), proc.env...)
+	process.Stdout = os.Stdout
 	stderr, err := process.StderrPipe()
 	if err != nil {
 		log.Fatal().Err(err).Msgf("failed to setup stderr process %s", proc.name)
@@ -443,7 +445,14 @@ func runProcess(proc process, stderrLines chan string) *exec.Cmd {
 	stderrScanner := bufio.NewScanner(stderr)
 	go func() {
 		for stderrScanner.Scan() {
-			stderrLines <- fmt.Sprintf(">> %s > %s", proc.name, stderrScanner.Text())
+			line := fmt.Sprintf(">> %s > %s", proc.name, stderrScanner.Text())
+			select {
+			case stderrLines <- line:
+			default:
+				// Startup has no log consumer yet. Never block the child on
+				// a full diagnostic queue before it can open its listen port.
+				fmt.Fprintln(os.Stderr, line)
+			}
 		}
 	}()
 	if os.Getenv("DEBUG") != "" {
@@ -488,7 +497,9 @@ func tern(iter int64, providers []types.Provider) {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to createdb")
 	}
-	cmd := exec.Command("tern", "migrate", "-c", "/app/directory/tern/tern.conf", "--database", dbname, "-m", "/app/directory/tern")
+	// The checked-in example config contains placeholder credentials. Explicit
+	// flags bind this isolated fixture to its Compose database.
+	cmd := exec.Command("tern", "migrate", "-c", "/app/directory/tern/tern.conf", "--host", "directory-postgres", "--user", "arkeo", "--password", "arkeo123", "--database", dbname, "-m", "/app/directory/tern")
 	cmd.Env = append(
 		os.Environ(),
 		fmt.Sprintf("POSTGRES_DB=%s", dbname),
@@ -497,8 +508,8 @@ func tern(iter int64, providers []types.Provider) {
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Debug().Msg(string(out))
-		log.Fatal().Err(err).Msg("failed to migrate postres")
+		log.Error().Msg(string(out))
+		log.Fatal().Err(err).Msg("failed to migrate postgres")
 	}
 
 	// insert providers
@@ -532,9 +543,13 @@ func tern(iter int64, providers []types.Provider) {
 func waitForPort(name, host string) {
 	// wait for process to listen on block creation port
 	log.Debug().Msgf("Waiting for %s port %s", name, host)
+	deadline := time.Now().Add(60 * time.Second)
 	for i := 0; ; i++ {
+		if time.Now().After(deadline) {
+			log.Fatal().Msgf("process %s did not listen on %s within 60 seconds", name, host)
+		}
 		time.Sleep(100 * time.Millisecond)
-		conn, err := net.Dial("tcp", host)
+		conn, err := net.DialTimeout("tcp", host, time.Second)
 		if err == nil {
 			conn.Close()
 			break

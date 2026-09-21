@@ -1,0 +1,16 @@
+name: Sentinel readiness regression
+on:
+  pull_request:
+    paths: ['sentinel/**', '.github/workflows/readiness-sentinel.yml']
+permissions:
+  contents: read
+jobs:
+  sentinel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - run: go test -race ./sentinel/... ./x/arkeo/keeper/... ./x/arkeo/types/...

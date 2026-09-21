@@ -3,16 +3,20 @@ package sentinel
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 type NonceStore struct {
+	mu     sync.Mutex
 	logger zerolog.Logger
 	db     *leveldb.DB
 }
@@ -62,38 +66,75 @@ func (s *NonceStore) Get(contractId uint64) (int64, error) {
 		s.logger.Error().Err(err).Msg("fail to get nonce record")
 		return 0, err
 	}
-	
+
 	var record NonceRecord
 	if err := json.Unmarshal(value, &record); err != nil {
 		s.logger.Error().Err(err).Msg("fail to unmarshal nonce record")
 		return 0, err
 	}
-	
+
+	if record.ContractId != contractId || record.Nonce < 0 {
+		return 0, fmt.Errorf("invalid persisted nonce record")
+	}
 	return record.Nonce, nil
 }
 
 func (s *NonceStore) Set(contractId uint64, nonce int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.Get(contractId)
+	if err != nil {
+		return err
+	}
+	if nonce < 0 || nonce < current {
+		return fmt.Errorf("nonce rollback rejected")
+	}
 	record := NonceRecord{
 		ContractId: contractId,
 		Nonce:      nonce,
 		UpdatedAt:  time.Now().Unix(),
 	}
-	
+
 	key := strconv.FormatUint(contractId, 10)
 	buf, err := json.Marshal(record)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("fail to marshal nonce record")
 		return err
 	}
-	
-	if err := s.db.Put([]byte(key), buf, nil); err != nil {
+
+	if err := s.db.Put([]byte(key), buf, &opt.WriteOptions{Sync: true}); err != nil {
 		s.logger.Error().Err(err).Msg("fail to set nonce record")
 		return err
 	}
-	
+
 	return nil
 }
 
 func (s *NonceStore) Close() error {
 	return s.db.Close()
+}
+
+// ReserveAfter coordinates all auth managers sharing this store and persists before use.
+func (s *NonceStore) ReserveAfter(contractID uint64, floor int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.Get(contractID)
+	if err != nil {
+		return 0, err
+	}
+	if floor > current {
+		current = floor
+	}
+	if current < 0 || current == math.MaxInt64 {
+		return 0, fmt.Errorf("nonce exhausted or invalid")
+	}
+	next := current + 1
+	buf, err := json.Marshal(NonceRecord{ContractId: contractID, Nonce: next, UpdatedAt: time.Now().Unix()})
+	if err != nil {
+		return 0, err
+	}
+	if err := s.db.Put([]byte(strconv.FormatUint(contractID, 10)), buf, &opt.WriteOptions{Sync: true}); err != nil {
+		return 0, err
+	}
+	return next, nil
 }
