@@ -168,10 +168,11 @@ func TestHandleHandleContractSettlementEvent(t *testing.T) {
 	testConfig := newTestConfig()
 	proxy, err := NewProxy(testConfig)
 	require.NoError(t, err)
+	clientPubKey, clientKey := newSigningTestClient(t)
 	inputContract := types.Contract{
 		Provider:           testConfig.ProviderPubKey,
 		Service:            common.BTCService,
-		Client:             types.GetRandomPubKey(),
+		Client:             clientPubKey,
 		Delegate:           common.EmptyPubKey,
 		Type:               types.ContractType_PAY_AS_YOU_GO,
 		Height:             100,
@@ -201,6 +202,7 @@ func TestHandleHandleContractSettlementEvent(t *testing.T) {
 		Spender:    inputContract.Client,
 		Nonce:      10,
 	}
+	signTestArkAuth(t, clientKey, &arkAuth)
 	_, err = proxy.paidTier(arkAuth, "")
 	require.NoError(t, err)
 

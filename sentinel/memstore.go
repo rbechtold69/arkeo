@@ -37,6 +37,9 @@ func NewMemStore(baseURL string, authManager *ArkeoAuthManager, logger log.Logge
 		db:        make(map[string]types.Contract),
 		client: http.Client{
 			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		baseURL:     baseURL,
 		authManager: authManager,
@@ -128,11 +131,9 @@ func (k *MemStore) fetchContract(key string) (types.Contract, error) {
 
 	var data fetch
 	requestURL := fmt.Sprintf("%s/arkeo/contract/%s", k.baseURL, key)
-	k.logger.Info("DEBUG: request uri", "uri", requestURL)
 	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
 	if err != nil {
-		k.logger.Error("fail to create http request", "error", err)
-		return contract, err
+		return contract, fmt.Errorf("invalid contract endpoint")
 	}
 
 	// Add authentication header if auth manager is configured
@@ -145,19 +146,25 @@ func (k *MemStore) fetchContract(key string) (types.Contract, error) {
 		req.Header.Set(QueryArkAuth, authHeader)
 	}
 	
-	res, err := http.DefaultClient.Do(req)
+	res, err := k.client.Do(req)
 	if err != nil {
-		k.logger.Error("fail to send http request", "error", err)
-		return contract, err
+		return contract, fmt.Errorf("contract endpoint request failed")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return contract, fmt.Errorf("contract endpoint returned status %d", res.StatusCode)
 	}
 
-	resBody, err := io.ReadAll(res.Body)
+	const maxContractResponse = 1 << 20
+	resBody, err := io.ReadAll(io.LimitReader(res.Body, maxContractResponse+1))
 	if err != nil {
 		k.logger.Error("DEBUG: fail to read from response body", "error", err)
 		return contract, err
 	}
 
-	k.logger.Info("DEBUG: response body", "body", string(resBody))
+	if len(resBody) > maxContractResponse {
+		return contract, fmt.Errorf("contract endpoint response exceeds limit")
+	}
 
 	err = json.Unmarshal(resBody, &data)
 	if err != nil {

@@ -87,10 +87,11 @@ func TestHandleClaim(t *testing.T) {
 	testConfig := newTestConfig()
 	proxy, err := NewProxy(testConfig)
 	require.NoError(t, err)
+	clientPubKey, clientKey := newSigningTestClient(t)
 	inputContract := types.Contract{
 		Provider:           testConfig.ProviderPubKey,
 		Service:            common.BTCService,
-		Client:             types.GetRandomPubKey(),
+		Client:             clientPubKey,
 		Delegate:           common.EmptyPubKey,
 		Type:               types.ContractType_PAY_AS_YOU_GO,
 		Height:             100,
@@ -117,6 +118,7 @@ func TestHandleClaim(t *testing.T) {
 		Spender:    inputContract.Client,
 		Nonce:      10,
 	}
+	signTestArkAuth(t, clientKey, &arkAuth)
 	_, err = proxy.paidTier(arkAuth, "")
 	require.NoError(t, err)
 
@@ -156,10 +158,11 @@ func TestHandleOpenClaims(t *testing.T) {
 	testConfig := newTestConfig()
 	proxy, err := NewProxy(testConfig)
 	require.NoError(t, err)
+	clientPubKey, clientKey := newSigningTestClient(t)
 	inputContract := types.Contract{
 		Provider:           testConfig.ProviderPubKey,
 		Service:            common.BTCService,
-		Client:             types.GetRandomPubKey(),
+		Client:             clientPubKey,
 		Delegate:           common.EmptyPubKey,
 		Type:               types.ContractType_PAY_AS_YOU_GO,
 		Height:             100,
@@ -185,11 +188,13 @@ func TestHandleOpenClaims(t *testing.T) {
 		Spender:    inputContract.Client,
 		Nonce:      10,
 	}
+	signTestArkAuth(t, clientKey, &arkAuth)
 	_, err = proxy.paidTier(arkAuth, "")
 	require.NoError(t, err)
 
 	// repeat for a second contract rom a different client
-	inputContract.Client = types.GetRandomPubKey()
+	clientPubKey, clientKey = newSigningTestClient(t)
+	inputContract.Client = clientPubKey
 	inputContract.Id = 420
 	openEvent = types.NewOpenContractEvent(openCost, &inputContract)
 	sdkEvt, err = sdk.TypedEventToEvent(&openEvent)
@@ -202,6 +207,7 @@ func TestHandleOpenClaims(t *testing.T) {
 		Spender:    inputContract.Client,
 		Nonce:      15,
 	}
+	signTestArkAuth(t, clientKey, &arkAuth)
 	_, err = proxy.paidTier(arkAuth, "")
 	require.NoError(t, err)
 

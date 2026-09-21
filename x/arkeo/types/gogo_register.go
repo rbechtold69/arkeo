@@ -8,6 +8,10 @@ import (
 // cdctypes.MsgTypeURL derives stable names even though protoc-gen-gocosmos
 // registers against github.com/gogo/protobuf/proto.
 func init() {
+	// JSON event decoding also needs enum names in the Cosmos registry.
+	cosmosproto.RegisterEnum("arkeo.arkeo.ProviderStatus", ProviderStatus_name, ProviderStatus_value)
+	cosmosproto.RegisterEnum("arkeo.arkeo.ContractType", ContractType_name, ContractType_value)
+	cosmosproto.RegisterEnum("arkeo.arkeo.ContractAuthorization", ContractAuthorization_name, ContractAuthorization_value)
 	cosmosproto.RegisterFile("arkeo/arkeo/tx.proto", fileDescriptor_a12700967a3e4015)
 	cosmosproto.RegisterFile("arkeo/arkeo/query.proto", fileDescriptor_4b28dca1d1dd051d)
 	cosmosproto.RegisterFile("arkeo/arkeo/genesis.proto", fileDescriptor_caae968dd754c6d4)

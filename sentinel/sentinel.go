@@ -1,7 +1,6 @@
 package sentinel
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/subtle"
@@ -74,15 +73,6 @@ func NewProxy(config conf.Configuration) (*Proxy, error) {
 	serviceIDs := loadServiceRegistry(config, logger)
 	proxies := loadProxies(config, logger, serviceIDs)
 
-	fmt.Println("DEBUG: Proxies loaded at startup:")
-	for name, uri := range proxies {
-		if uri == nil {
-			//fmt.Printf("  %s -> [NOT CONFIGURED]\n", name)
-		} else {
-			fmt.Printf("  %s -> %s\n", name, uri.String())
-		}
-	}
-
 	// Initialize auth manager if configured
 	var authManager *ArkeoAuthManager
 	if config.ArkeoAuthContractId > 0 && config.ArkeoAuthMnemonic != "" {
@@ -127,86 +117,35 @@ func NewProxy(config conf.Configuration) (*Proxy, error) {
 }
 
 func loadProxies(config conf.Configuration, logger log.Logger, serviceIDs map[string]int32) map[string]*url.URL {
-
-	logger.Error("DEBUG:FUNCTION: loadProxies")
-
 	proxies := make(map[string]*url.URL)
 	serviceMap := make(map[string]conf.ServiceConfig)
-
-	logger.Error("DEBUG: Loading config services from YAML")
-	for i, svc := range config.Services {
-		logger.Error("DEBUG: YAML Config Service",
-			"idx", i,
-			"Name", svc.Name,
-			"RpcUrl", svc.RpcUrl,
-			"RpcUser", svc.RpcUser,
-			"RpcPassSet", svc.RpcPass != "")
-	}
-
-	// Populate serviceMap and print its contents
 	for _, svc := range config.Services {
 		serviceMap[svc.Name] = svc
 	}
-	logger.Error("DEBUG: Listing all serviceMap keys")
-	for k, v := range serviceMap {
-		logger.Error("DEBUG: serviceMap entry", "name", k, "RpcUrl", v.RpcUrl, "RpcUser", v.RpcUser, "RpcPassSet", v.RpcPass != "")
-	}
 
 	for serviceName := range serviceIDs {
-		//logger.Error("DEBUG: Checking serviceName", "serviceName", serviceName)
-		if svc, ok := serviceMap[serviceName]; ok {
-			var fullURL string
-			logger.Error("DEBUG: Found serviceMap", "serviceName", serviceName, "RpcUrl", svc.RpcUrl)
-			if strings.HasPrefix(svc.RpcUrl, "https://") {
-				if svc.RpcUser != "" && svc.RpcPass != "" {
-					rpcURL := strings.TrimPrefix(svc.RpcUrl, "https://")
-					fullURL = fmt.Sprintf("https://%s:%s@%s", svc.RpcUser, svc.RpcPass, rpcURL)
-				} else {
-					fullURL = svc.RpcUrl
-				}
-			} else {
-				if svc.RpcUser != "" && svc.RpcPass != "" {
-					rpcURL := strings.TrimPrefix(svc.RpcUrl, "http://")
-					fullURL = fmt.Sprintf("http://%s:%s@%s", svc.RpcUser, svc.RpcPass, rpcURL)
-				} else {
-					fullURL = svc.RpcUrl
-				}
-				logger.Error("DEBUG: Insecure endpoint", "serviceName", serviceName, "url", fullURL)
-			}
-
-			parsed := common.MustParseURL(fullURL)
-			if parsed == nil {
-				logger.Error("DEBUG: Could not parse URL for service", "serviceName", serviceName, "url", fullURL)
-			} else {
-				logger.Error("DEBUG: Loaded proxy", "serviceName", serviceName, "proxyUrl", parsed.String())
-			}
-			proxies[serviceName] = parsed
+		svc, configured := serviceMap[serviceName]
+		rawURL := svc.RpcUrl
+		if !configured {
+			envKey := strings.ToUpper(strings.ReplaceAll(serviceName, "-", "_"))
+			rawURL = os.Getenv(envKey)
+		}
+		if rawURL == "" {
+			proxies[serviceName] = nil
 			continue
 		}
-
-		envKey := strings.ToUpper(strings.ReplaceAll(serviceName, "-", "_"))
-		env, envOk := os.LookupEnv(envKey)
-		if envOk {
-			parsed := common.MustParseURL(env)
-			if parsed == nil {
-				logger.Error("DEBUG: Could not parse ENV URL for service", "serviceName", serviceName, "env", env)
-			} else {
-				logger.Error("DEBUG: Service uses ENV", "serviceName", serviceName, "envKey", envKey, "envUrl", parsed.String())
-			}
-			proxies[serviceName] = parsed
-		} else {
-			//logger.Error("DEBUG:MISS: Service not configured in YAML or ENV", "serviceName", serviceName)
+		parsed, err := url.Parse(strings.TrimSpace(rawURL))
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			// URLs and parse errors can contain provider credentials or API keys.
+			logger.Error("invalid upstream URL", "service", serviceName)
 			proxies[serviceName] = nil
+			continue
 		}
-	}
-
-	//logger.Error("DEBUG: Final proxies loaded")
-	for svc, u := range proxies {
-		if u == nil {
-			//logger.Error("DEBUG: proxy not configured", "service", svc)
-		} else {
-			logger.Error("DEBUG: proxy loaded", "service", svc, "uri", u.String())
+		if configured && svc.RpcUser != "" && svc.RpcPass != "" {
+			parsed.User = url.UserPassword(svc.RpcUser, svc.RpcPass)
 		}
+		proxies[serviceName] = parsed
+		logger.Info("proxy configured", "service", serviceName)
 	}
 	return proxies
 }
@@ -287,7 +226,6 @@ func (p *Proxy) handleRequestAndRedirect(w http.ResponseWriter, r *http.Request)
 	p.logger.Info("DEBUG:TRACE: handleRequestAndRedirect called",
 		"path", r.URL.Path,
 		"method", r.Method,
-		"query", r.URL.RawQuery,
 	)
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // TODO: Check
@@ -306,17 +244,6 @@ func (p *Proxy) handleRequestAndRedirect(w http.ResponseWriter, r *http.Request)
 		serviceName = parts[1]
 	}
 
-	// Print all proxies and their URIs (for live debugging)
-	p.proxyMu.RLock()
-	for k, v := range p.proxies {
-		if v == nil {
-			//p.logger.Info("DEBUG:TRACE: Current proxy state", "service", k, "uri", "[NOT CONFIGURED]")
-		} else {
-			p.logger.Info("DEBUG:TRACE: Current proxy state", "service", k, "uri", v.String())
-		}
-	}
-	p.proxyMu.RUnlock()
-
 	p.proxyMu.RLock()
 	uri, exists := p.proxies[serviceName]
 	p.proxyMu.RUnlock()
@@ -328,7 +255,6 @@ func (p *Proxy) handleRequestAndRedirect(w http.ResponseWriter, r *http.Request)
 
 	p.logger.Info("DEBUG: Service selected",
 		"serviceName", serviceName,
-		"target_uri", uri.String(),
 	)
 
 	r.URL.Scheme = uri.Scheme
@@ -347,10 +273,12 @@ func (p *Proxy) handleRequestAndRedirect(w http.ResponseWriter, r *http.Request)
 
 	// check for the WebSocket upgrade header
 	if websocket.IsWebSocketUpgrade(r) {
-		p.logger.Info("[TRACE] WebSocket upgrade detected", "url", r.URL.String())
-		fmt.Println(">>>>>>> Entering websocket....")
+		p.logger.Info("WebSocket upgrade", "service", serviceName)
 		wsProxyURL := *r.URL
-		wsProxyURL.Scheme = "ws" // use the WebSocket scheme
+		wsProxyURL.Scheme = "ws"
+		if uri.Scheme == "https" {
+			wsProxyURL.Scheme = "wss"
+		}
 		wsProxy := websocketproxy.NewProxy(&wsProxyURL)
 		wsProxy.ServeHTTP(w, r)
 		return
@@ -360,16 +288,16 @@ func (p *Proxy) handleRequestAndRedirect(w http.ResponseWriter, r *http.Request)
 	// create the reverse proxy
 	proxy := common.NewSingleHostReverseProxy(r.URL)
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		p.logger.Info("DEBUG:PROXY: Upstream response", "status", resp.StatusCode, "url", resp.Request.URL.String())
+		p.logger.Info("upstream response", "status", resp.StatusCode, "service", serviceName)
 		return nil
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
-		p.logger.Error("DEBUG:PROXY ERROR: ", "err", err, "target", r.URL.String(), "serviceName", serviceName)
-		http.Error(rw, "Proxy error: "+err.Error(), http.StatusBadGateway)
+		p.logger.Error("upstream request failed", "service", serviceName)
+		http.Error(rw, "upstream request failed", http.StatusBadGateway)
 	}
-	p.logger.Info("DEBUG: Outgoing Proxy URL", "url", r.URL.String(), "method", r.Method)
+	p.logger.Info("proxy request", "service", serviceName, "method", r.Method)
 	proxy.ServeHTTP(w, r)
-	p.logger.Info("DEBUG:TRACE: Proxy call completed", "url", r.URL.String())
+	p.logger.Info("proxy request completed", "service", serviceName)
 }
 
 func (p *Proxy) handleMetadata(w http.ResponseWriter, r *http.Request) {
@@ -459,20 +387,6 @@ func (p *Proxy) handleContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.logger.Info("DEBUG: Incoming Headers")
-	for name, values := range r.Header {
-		for _, value := range values {
-			p.logger.Info("Header", "name", name, "value", value)
-		}
-	}
-	if r.Method == http.MethodPost {
-		bodyBytes, _ := io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Reset so the proxy can read again
-		p.logger.Info("[DEBUG] Request Body", "body", string(bodyBytes))
-	}
-	p.logger.Info("DEBUG:URL Query", "rawquery", r.URL.RawQuery)
-	p.logger.Info("DEBUG:QueryContract", "QueryContract", QueryContract)
-
 	// check authorization
 	var auth ContractAuth
 	raw := r.Header.Get(QueryContract)
@@ -485,18 +399,16 @@ func (p *Proxy) handleContract(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	p.logger.Info("DEBUG:raw", "raw", raw)
 
 	if len(raw) > 0 {
 
 		auth, err = parseContractAuth(raw)
 		if err != nil {
-			p.logger.Error("fail to parse contract auth", "error", err, "auth", raw[0])
+			p.logger.Error("fail to parse contract auth", "error", err)
 			respondWithError(w, fmt.Sprintf("bad contract auth: %s", err), http.StatusBadRequest)
 			return
 		}
 
-		p.logger.Info("DEBUG:parsed auth", "auth", auth)
 
 		contract, err := p.MemStore.Get(contractConf.Key())
 		if err != nil {
@@ -508,13 +420,13 @@ func (p *Proxy) handleContract(w http.ResponseWriter, r *http.Request) {
 		p.logger.Info("DEBUG:fetched contract", "contract", contract)
 
 		if err := auth.Validate(contractConf.LastTimeStamp, contract.Client); err != nil {
-			p.logger.Error("fail to validate contract auth", "error", err, "auth", auth.String())
+			p.logger.Error("fail to validate contract auth", "error", err)
 			respondWithError(w, fmt.Sprintf("bad contract auth: %s", err), http.StatusBadRequest)
 			return
 		}
 		contractConf.LastTimeStamp = auth.Timestamp
 		if err := p.ContractConfigStore.Set(contractConf); err != nil {
-			p.logger.Error("fail to save contract config", "error", err, "auth", auth.String())
+			p.logger.Error("fail to save contract config", "error", err)
 			respondWithError(w, fmt.Sprintf("fail to save contract config: %s", err), http.StatusBadRequest)
 			return
 		}

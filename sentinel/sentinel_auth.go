@@ -180,22 +180,10 @@ func (auth ContractAuth) Validate(lastTimestamp int64, client common.PubKey) err
 
 	msg := fmt.Sprintf("%d:%d:%s", auth.ContractId, auth.Timestamp, auth.ChainId)
 
-	// --- DEBUG PRINTS ---
-	fmt.Printf("DEBUG: ContractId: %d\n", auth.ContractId)
-	fmt.Printf("DEBUG: Timestamp:  %d\n", auth.Timestamp)
-	fmt.Printf("DEBUG: ChainId:    '%s'\n", auth.ChainId)
-	fmt.Printf("DEBUG: Message:    '%s'\n", msg)
-	fmt.Printf("DEBUG: Client PubKey (bech32): %s\n", client.String())
-	fmt.Printf("DEBUG: Client PubKey (hex):    %x\n", pk.Bytes())
-	fmt.Printf("DEBUG: Signature (hex):        %x\n", auth.Signature)
-	// --- END DEBUG PRINTS ---
-
 	if !pk.VerifySignature([]byte(msg), auth.Signature) {
-		fmt.Println("DEBUG: Signature verification FAILED")
 		return fmt.Errorf("invalid signature")
 	}
 
-	fmt.Println("DEBUG: Signature verification PASSED")
 	return nil
 }
 
