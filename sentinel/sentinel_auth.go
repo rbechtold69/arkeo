@@ -3,9 +3,9 @@ package sentinel
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
-	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -239,7 +239,9 @@ func (p Proxy) auth(next http.Handler) http.Handler {
 		if aa.ContractId > 0 {
 			contract, err = p.MemStore.Get(strconv.FormatUint(aa.ContractId, 10))
 			if err != nil {
-				p.logger.Error("failed to fetch contract", "error", err)
+				p.logger.Error("failed to fetch contract")
+				http.Error(w, "contract unavailable", http.StatusServiceUnavailable)
+				return
 			}
 
 			// Do not serve expired subscription contracts
@@ -418,7 +420,9 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 		return http.StatusUnauthorized, fmt.Errorf("contract is not served by this provider")
 	}
 	expectedSpender := contract.GetSpender()
-	if aa.Spender.IsEmpty() { aa.Spender = expectedSpender }
+	if aa.Spender.IsEmpty() {
+		aa.Spender = expectedSpender
+	}
 	if !aa.Spender.Equals(expectedSpender) {
 		return http.StatusUnauthorized, fmt.Errorf("unauthorized contract spender")
 	}
@@ -468,13 +472,20 @@ func (p Proxy) paidTier(aa ArkAuth, remoteAddr string) (code int, err error) {
 	for _, chainID := range []string{"", p.Config.ArkeoAuthChainId} {
 		pre := []byte(fmt.Sprintf("%d:%d:%s", aa.ContractId, aa.Nonce, chainID))
 		digest := sha256.Sum256(pre)
-		if pk.VerifySignature(pre, aa.Signature) || pk.VerifySignature(digest[:], aa.Signature) { valid = true; break }
+		if pk.VerifySignature(pre, aa.Signature) || pk.VerifySignature(digest[:], aa.Signature) {
+			valid = true
+			break
+		}
 	}
-	if !valid { return http.StatusUnauthorized, fmt.Errorf("invalid signature for client") }
+	if !valid {
+		return http.StatusUnauthorized, fmt.Errorf("invalid signature for client")
+	}
 	claim := NewClaim(aa.ContractId, expectedSpender, aa.Nonce, hex.EncodeToString(aa.Signature))
 	claim.Provider = p.Config.ProviderPubKey
 	if err := p.ClaimStore.Accept(claim); err != nil {
-		if errors.Is(err, ErrClaimNonce) { return http.StatusBadRequest, err }
+		if errors.Is(err, ErrClaimNonce) {
+			return http.StatusBadRequest, err
+		}
 		return http.StatusInternalServerError, fmt.Errorf("claim persistence failed")
 	}
 

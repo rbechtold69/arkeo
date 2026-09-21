@@ -64,10 +64,14 @@ func (am *ArkeoAuthManager) GenerateAuthHeader() (string, error) {
 
 	if am.nonceStore != nil {
 		next, err := am.nonceStore.ReserveAfter(am.contractId, am.nonce)
-		if err != nil { return "", fmt.Errorf("failed to reserve nonce: %w", err) }
+		if err != nil {
+			return "", fmt.Errorf("failed to reserve nonce: %w", err)
+		}
 		am.nonce = next
 	} else {
-		if am.nonce == math.MaxInt64 { return "", fmt.Errorf("nonce exhausted") }
+		if am.nonce == math.MaxInt64 {
+			return "", fmt.Errorf("nonce exhausted")
+		}
 		am.nonce++
 	}
 

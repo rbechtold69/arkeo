@@ -176,18 +176,36 @@ func loadServiceRegistry(config conf.Configuration, logger log.Logger) map[strin
 func fetchServiceRegistry(base string, client *http.Client, logger log.Logger) map[string]int32 {
 	registry := make(map[string]int32)
 	resp, err := client.Get(strings.TrimRight(base, "/") + "/arkeo/services")
-	if err != nil { logger.Error("service registry unavailable"); return registry }
+	if err != nil {
+		logger.Error("service registry unavailable")
+		return registry
+	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK { return registry }
+	if resp.StatusCode != http.StatusOK {
+		return registry
+	}
 	const limit = 1 << 20
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if err != nil || len(body) > limit { return registry }
-	var payload struct { Services []struct { ServiceId int32 `json:"service_id"`; Name string `json:"name"` } `json:"services"` }
-	if json.Unmarshal(body, &payload) != nil { return registry }
+	if err != nil || len(body) > limit {
+		return registry
+	}
+	var payload struct {
+		Services []struct {
+			ServiceId int32  `json:"service_id"`
+			Name      string `json:"name"`
+		} `json:"services"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return registry
+	}
 	for _, svc := range payload.Services {
 		name := strings.ToLower(strings.TrimSpace(svc.Name))
-		if name == "" || svc.ServiceId <= 0 || strings.ContainsAny(name, "/?# ") { return map[string]int32{} }
-		if _, duplicate := registry[name]; duplicate { return map[string]int32{} }
+		if name == "" || svc.ServiceId <= 0 || strings.ContainsAny(name, "/?# ") {
+			return map[string]int32{}
+		}
+		if _, duplicate := registry[name]; duplicate {
+			return map[string]int32{}
+		}
 		registry[name] = svc.ServiceId
 	}
 	return registry
@@ -202,7 +220,8 @@ func (p *Proxy) refreshServiceRegistry(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			reg := loadServiceRegistry(p.Config, p.logger)
+			client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
+			reg := fetchServiceRegistry(p.Config.HubProviderURI, client, p.logger)
 			if len(reg) == 0 {
 				continue
 			}
@@ -235,6 +254,7 @@ func (p *Proxy) handleRequestAndRedirect(w http.ResponseWriter, r *http.Request)
 	// remove arkauth query arg
 	values := r.URL.Query()
 	values.Del(QueryArkAuth)
+	r.Header.Del(QueryArkAuth)
 	r.URL.RawQuery = values.Encode()
 
 	parts := strings.Split(r.URL.Path, "/")
@@ -555,7 +575,9 @@ func (p *Proxy) handleMarkClaimed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := 0
-	if matched { updated = 1 }
+	if matched {
+		updated = 1
+	}
 
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "updated": updated})
 }

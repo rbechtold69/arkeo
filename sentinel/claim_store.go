@@ -2,23 +2,23 @@ package sentinel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
-	"errors"
 
 	"github.com/arkeonetwork/arkeo/common"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type ClaimStore struct {
-	mu sync.Mutex
+	mu     sync.Mutex
 	logger zerolog.Logger
 	db     *leveldb.DB
 }
@@ -69,7 +69,9 @@ var ErrClaimNonce = errors.New("claim nonce must increase")
 
 func (s *ClaimStore) write(item Claim) error {
 	buf, err := json.Marshal(item)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return s.db.Put([]byte(item.Key()), buf, &opt.WriteOptions{Sync: true})
 }
 
@@ -78,8 +80,12 @@ func (s *ClaimStore) Accept(item Claim) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, err := s.Get(item.Key())
-	if err != nil { return err }
-	if item.Nonce <= 0 || old.Nonce >= item.Nonce { return ErrClaimNonce }
+	if err != nil {
+		return err
+	}
+	if item.Nonce <= 0 || old.Nonce >= item.Nonce {
+		return ErrClaimNonce
+	}
 	return s.write(item)
 }
 
@@ -87,7 +93,9 @@ func (s *ClaimStore) Set(item Claim) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, err := s.Get(item.Key())
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if item.Nonce < old.Nonce || (item.Nonce == old.Nonce && old.Claimed && !item.Claimed) {
 		return ErrClaimNonce
 	}
@@ -100,8 +108,12 @@ func (s *ClaimStore) MarkClaimed(contractID uint64, nonce int64) (bool, error) {
 	defer s.mu.Unlock()
 	key := strconv.FormatUint(contractID, 10)
 	item, err := s.Get(key)
-	if err != nil { return false, err }
-	if item.ContractId != contractID || item.Nonce != nonce { return false, nil }
+	if err != nil {
+		return false, err
+	}
+	if item.ContractId != contractID || item.Nonce != nonce {
+		return false, nil
+	}
 	item.Claimed = true
 	return true, s.write(item)
 }
@@ -110,10 +122,18 @@ func (s *ClaimStore) Batch(items []Claim) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	batch := new(leveldb.Batch)
+	pending := make(map[string]Claim)
 	for _, item := range items {
 		old, err := s.Get(item.Key())
-		if err != nil { return err }
-		if item.Nonce < old.Nonce || (item.Nonce == old.Nonce && old.Claimed && !item.Claimed) { return ErrClaimNonce }
+		if err != nil {
+			return err
+		}
+		if staged, ok := pending[item.Key()]; ok {
+			old = staged
+		}
+		if item.Nonce < old.Nonce || (item.Nonce == old.Nonce && old.Claimed && !item.Claimed) {
+			return ErrClaimNonce
+		}
 		key := item.Key()
 		buf, err := json.Marshal(item)
 		if err != nil {
@@ -121,14 +141,19 @@ func (s *ClaimStore) Batch(items []Claim) error {
 			return err
 		}
 		batch.Put([]byte(key), buf)
+		pending[key] = item
 	}
 	return s.db.Write(batch, &opt.WriteOptions{Sync: true})
 }
 
 func (s *ClaimStore) Get(key string) (item Claim, err error) {
 	buf, err := s.db.Get([]byte(key), nil)
-	if errors.Is(err, leveldb.ErrNotFound) { return item, nil }
-	if err != nil { return item, err }
+	if errors.Is(err, leveldb.ErrNotFound) {
+		return item, nil
+	}
+	if err != nil {
+		return item, err
+	}
 	if err := json.Unmarshal(buf, &item); err != nil {
 		s.logger.Error().Err(err).Msg("fail to unmarshal to claim store item")
 		return item, err

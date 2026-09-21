@@ -488,7 +488,9 @@ func tern(iter int64, providers []types.Provider) {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to createdb")
 	}
-	cmd := exec.Command("tern", "migrate", "-c", "/app/directory/tern/tern.conf", "--database", dbname, "-m", "/app/directory/tern")
+	// The checked-in example config contains placeholder credentials. Explicit
+	// flags bind this isolated fixture to its Compose database.
+	cmd := exec.Command("tern", "migrate", "-c", "/app/directory/tern/tern.conf", "--host", "directory-postgres", "--user", "arkeo", "--password", "arkeo123", "--database", dbname, "-m", "/app/directory/tern")
 	cmd.Env = append(
 		os.Environ(),
 		fmt.Sprintf("POSTGRES_DB=%s", dbname),
@@ -497,8 +499,8 @@ func tern(iter int64, providers []types.Provider) {
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Debug().Msg(string(out))
-		log.Fatal().Err(err).Msg("failed to migrate postres")
+		log.Error().Msg(string(out))
+		log.Fatal().Err(err).Msg("failed to migrate postgres")
 	}
 
 	// insert providers
