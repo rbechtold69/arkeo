@@ -443,7 +443,14 @@ func runProcess(proc process, stderrLines chan string) *exec.Cmd {
 	stderrScanner := bufio.NewScanner(stderr)
 	go func() {
 		for stderrScanner.Scan() {
-			stderrLines <- fmt.Sprintf(">> %s > %s", proc.name, stderrScanner.Text())
+			line := fmt.Sprintf(">> %s > %s", proc.name, stderrScanner.Text())
+			select {
+			case stderrLines <- line:
+			default:
+				// Startup has no log consumer yet. Never block the child on
+				// a full diagnostic queue before it can open its listen port.
+				fmt.Fprintln(os.Stderr, line)
+			}
 		}
 	}()
 	if os.Getenv("DEBUG") != "" {
@@ -534,9 +541,13 @@ func tern(iter int64, providers []types.Provider) {
 func waitForPort(name, host string) {
 	// wait for process to listen on block creation port
 	log.Debug().Msgf("Waiting for %s port %s", name, host)
+	deadline := time.Now().Add(60 * time.Second)
 	for i := 0; ; i++ {
+		if time.Now().After(deadline) {
+			log.Fatal().Msgf("process %s did not listen on %s within 60 seconds", name, host)
+		}
 		time.Sleep(100 * time.Millisecond)
-		conn, err := net.Dial("tcp", host)
+		conn, err := net.DialTimeout("tcp", host, time.Second)
 		if err == nil {
 			conn.Close()
 			break
