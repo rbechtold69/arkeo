@@ -2,8 +2,8 @@ package sentinel
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -23,7 +25,6 @@ import (
 	"github.com/koding/websocketproxy"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
-	"sync"
 
 	"github.com/arkeonetwork/arkeo/common"
 	"github.com/arkeonetwork/arkeo/sentinel/conf"
@@ -399,7 +400,6 @@ func (p *Proxy) handleContract(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-
 	if len(raw) > 0 {
 
 		auth, err = parseContractAuth(raw)
@@ -408,7 +408,6 @@ func (p *Proxy) handleContract(w http.ResponseWriter, r *http.Request) {
 			respondWithError(w, fmt.Sprintf("bad contract auth: %s", err), http.StatusBadRequest)
 			return
 		}
-
 
 		contract, err := p.MemStore.Get(contractConf.Key())
 		if err != nil {

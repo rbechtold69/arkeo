@@ -1,7 +1,6 @@
 package sentinel
 
 import (
-	"github.com/gorilla/mux"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,12 +10,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/arkeonetwork/arkeo/common"
-	"github.com/arkeonetwork/arkeo/sentinel/conf"
-	"github.com/arkeonetwork/arkeo/x/arkeo/types"
+	"github.com/gorilla/mux"
+
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/arkeonetwork/arkeo/common"
+	"github.com/arkeonetwork/arkeo/sentinel/conf"
+	"github.com/arkeonetwork/arkeo/x/arkeo/types"
 )
 
 // If both files define testMnemonic, keep only one definition.
@@ -242,8 +244,8 @@ func TestHandleActiveContract_WithAuth(t *testing.T) {
 			// Verify auth header format
 			parts := strings.Split(receivedAuthHeader, ":")
 			assert.Len(t, parts, 3)
-			assert.Equal(t, "12345", parts[0])      // contract ID
-			assert.NotEmpty(t, parts[2]) // signature; chain ID is supplied by the sentinel
+			assert.Equal(t, "12345", parts[0]) // contract ID
+			assert.NotEmpty(t, parts[2])       // signature; chain ID is supplied by the sentinel
 		}
 
 		// Return a mock response

@@ -9,8 +9,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 type NonceStore struct {
@@ -63,13 +63,13 @@ func (s *NonceStore) Get(contractId uint64) (int64, error) {
 		s.logger.Error().Err(err).Msg("fail to get nonce record")
 		return 0, err
 	}
-	
+
 	var record NonceRecord
 	if err := json.Unmarshal(value, &record); err != nil {
 		s.logger.Error().Err(err).Msg("fail to unmarshal nonce record")
 		return 0, err
 	}
-	
+
 	return record.Nonce, nil
 }
 
@@ -79,19 +79,19 @@ func (s *NonceStore) Set(contractId uint64, nonce int64) error {
 		Nonce:      nonce,
 		UpdatedAt:  time.Now().Unix(),
 	}
-	
+
 	key := strconv.FormatUint(contractId, 10)
 	buf, err := json.Marshal(record)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("fail to marshal nonce record")
 		return err
 	}
-	
+
 	if err := s.db.Put([]byte(key), buf, &opt.WriteOptions{Sync: true}); err != nil {
 		s.logger.Error().Err(err).Msg("fail to set nonce record")
 		return err
 	}
-	
+
 	return nil
 }
 

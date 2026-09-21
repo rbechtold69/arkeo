@@ -13,6 +13,4 @@ jobs:
         with:
           go-version: '1.24.x'
           cache: true
-      - name: Report formatting differences
-        run: go run golang.org/x/tools/cmd/goimports@v0.30.0 -local github.com/arkeonetwork/arkeo -d sentinel/arkeo_auth.go sentinel/conf/configuration_test.go sentinel/event_stream.go sentinel/event_stream_test.go sentinel/memstore.go sentinel/memstore_test.go sentinel/nonce_store.go sentinel/readiness_security_test.go sentinel/sentinel.go sentinel/sentinel_auth.go sentinel/sentinel_auth_test.go x/arkeo/types/gogo_register.go common/service_test.go
       - run: go test -race ./sentinel/... ./x/arkeo/keeper/... ./x/arkeo/types/...

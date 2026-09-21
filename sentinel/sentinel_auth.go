@@ -4,16 +4,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/arkeonetwork/arkeo/common"
-	"github.com/arkeonetwork/arkeo/common/cosmos"
-	"github.com/arkeonetwork/arkeo/x/arkeo/types"
-	"golang.org/x/crypto/sha3"
-	"golang.org/x/time/rate"
-	"net/http"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+
+	"golang.org/x/crypto/sha3"
+	"golang.org/x/time/rate"
+
+	"github.com/arkeonetwork/arkeo/common"
+	"github.com/arkeonetwork/arkeo/common/cosmos"
+	"github.com/arkeonetwork/arkeo/x/arkeo/types"
 )
 
 const (

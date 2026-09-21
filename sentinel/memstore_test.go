@@ -45,7 +45,7 @@ func httpTestHandler(t *testing.T, rw http.ResponseWriter, content string) {
 func (s *MemStoreSuite) TestMemStore() {
 	// Use a dynamic test pubkey to avoid hardcoding invalid ones
 	testPK := types.GetRandomPubKey()
-	
+
 	// Recreate server with the dynamic pubkey
 	s.server = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		expectedURI := fmt.Sprintf("/arkeo/contract/%s/arkeo-mainnet/%s", testPK.String(), testPK.String())
@@ -71,7 +71,7 @@ func (s *MemStoreSuite) TestMemStore() {
 		}
 	}))
 	defer s.server.Close()
-	
+
 	var err error
 	baseURL := fmt.Sprintf("http://%s", s.server.Listener.Addr().String())
 	mem := NewMemStore(baseURL, nil, log.NewTMLogger(log.NewSyncWriter(os.Stdout)))
@@ -106,7 +106,7 @@ func (s *MemStoreSuite) TestMemStore() {
 func (s *MemStoreSuite) TestMemStoreWithAuth() {
 	// Use a dynamic test pubkey
 	testPK := types.GetRandomPubKey()
-	
+
 	// Create a test server that verifies auth header
 	authChecked := false
 	testServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
@@ -123,7 +123,7 @@ func (s *MemStoreSuite) TestMemStoreWithAuth() {
 			assert.EqualValues(s.T(), 1, auth.Nonce)
 			assert.NotEmpty(s.T(), auth.Signature)
 		}
-		
+
 		// Return a mock contract
 		httpTestHandler(s.T(), rw, fmt.Sprintf(`
 { "contract": {
@@ -148,7 +148,7 @@ func (s *MemStoreSuite) TestMemStoreWithAuth() {
 	nonceStore, err := NewNonceStore("")
 	require.NoError(s.T(), err)
 	defer nonceStore.Close()
-	
+
 	testMnemonic := strings.Repeat("dog ", 23) + "fossil"
 	authManager, err := NewArkeoAuthManager(12345, "test-chain", testMnemonic, nonceStore, logger)
 	require.NoError(s.T(), err)
@@ -161,7 +161,7 @@ func (s *MemStoreSuite) TestMemStoreWithAuth() {
 	contract, err := mem.Get(key)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), contract.Rate.Amount.Int64(), int64(3))
-	
+
 	// Verify auth header was checked
 	require.True(s.T(), authChecked, "Auth header should have been sent")
 }

@@ -145,7 +145,7 @@ func (k *MemStore) fetchContract(key string) (types.Contract, error) {
 		}
 		req.Header.Set(QueryArkAuth, authHeader)
 	}
-	
+
 	res, err := k.client.Do(req)
 	if err != nil {
 		return contract, fmt.Errorf("contract endpoint request failed")

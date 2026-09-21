@@ -21,16 +21,16 @@ func newTestConfig() conf.Configuration {
 	c := cosmos.GetConfig()
 	c.SetBech32PrefixForAccount(app.AccountAddressPrefix, app.AccountAddressPrefix+"pub")
 	return conf.Configuration{
-		Moniker:            "Testy McTestface",
-		Website:            "testing.com",
-		Description:        "the best testnet ever",
-		Location:           "100,100",
-		Port:               "3636",
-		SourceChain:        "http://localhost:1317", // this should point to arkeo rpc endpoints, but we can ignore for testing
-		EventStreamHost:    "localhost",
-		ProviderPubKey:     types.GetRandomPubKey(),
-		FreeTierRateLimit:  100,
-		ClaimStoreLocation: "",
+		Moniker:             "Testy McTestface",
+		Website:             "testing.com",
+		Description:         "the best testnet ever",
+		Location:            "100,100",
+		Port:                "3636",
+		SourceChain:         "http://localhost:1317", // this should point to arkeo rpc endpoints, but we can ignore for testing
+		EventStreamHost:     "localhost",
+		ProviderPubKey:      types.GetRandomPubKey(),
+		FreeTierRateLimit:   100,
+		ClaimStoreLocation:  "",
 		ArkeoAuthContractId: 0, // No auth for tests
 		Services: []conf.ServiceConfig{{
 			Name:   "btc-mainnet-fullnode",
