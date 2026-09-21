@@ -290,7 +290,7 @@ func run(path string) error {
 		},
 		{
 			name:  "sentinel",
-			cmd:   []string{"/regtest/cover-sentinel"},
+			cmd:   []string{"/regtest/cover-sentinel", "--config", "/app/test/regression/sentinel.yaml"},
 			ports: []string{"3636"},
 			env: []string{
 				"GOCOVERDIR=/mnt/coverage",
@@ -302,6 +302,7 @@ func run(path string) error {
 				"LOCATION=n/a",
 				"PORT=3636",
 				"SOURCE_CHAIN=http://localhost:1317",
+				"PROVIDER_HUB_URI=http://localhost:1317",
 				"EVENT_STREAM_HOST=localhost:26657",
 				"FREE_RATE_LIMIT=10",
 				"CLAIM_STORE_LOCATION=/regtest/.arkeo/claims",
@@ -436,6 +437,7 @@ func runProcess(proc process, stderrLines chan string) *exec.Cmd {
 		process = exec.Command(proc.cmd[0], proc.cmd[1:]...) // #nosec G204
 	}
 	process.Env = append(os.Environ(), proc.env...)
+	process.Stdout = os.Stdout
 	stderr, err := process.StderrPipe()
 	if err != nil {
 		log.Fatal().Err(err).Msgf("failed to setup stderr process %s", proc.name)
