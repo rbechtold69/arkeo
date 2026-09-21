@@ -1,2 +1,10 @@
-# Runtime values are injected by the isolated regression process environment.
-{}
+# Fixture services use only the local mock daemon; other values come from the test environment.
+services:
+  - name: mock
+    id: 1
+    type: rpc
+    rpc_url: http://localhost:3765
+  - name: btc-mainnet-fullnode
+    id: 10
+    type: rpc
+    rpc_url: http://localhost:3765
